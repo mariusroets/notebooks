@@ -5,6 +5,7 @@ import requests
 from bs4 import BeautifulSoup
 import pandas as pd
 import numpy as np
+from scipy import optimize
 import matplotlib.pyplot as plt
 import seaborn as sns
 sns.set()
@@ -56,6 +57,10 @@ def read_jhu_file(filename, label):
                province=lambda x: np.where(x.province.isnull(), x.country, x.province)).
         set_index(['country', 'province', 'date'])
     )
+def expo(x, A, B):
+    return A*np.exp(B * x)
+def logistic(x, L, k, x0):
+    return L/(1 + np.exp(-k*(x - x0)))
 
 class Corona:
     """Retrieve, view and analyze data on the spread of Covid-19"""
@@ -117,16 +122,13 @@ class Corona:
             offsets = [0 for i in countries]
         if  len(offsets) < len(countries):
             offsets += [0 for i in range(len(countries) - len(offsets))]
-        idx = pd.IndexSlice
         plt.figure(figsize=self.figsize)
         plt.yscale(yscale)
         for i, country in enumerate(countries):
             for col in columns:
                 to_plot = (
-                    self.data.
-                    loc[idx[country, :, :], col].
-                    groupby(level=[0, 2]).
-                    sum().
+                    self.country_data(country).
+                    loc[:, col].
                     shift(-offsets[i])
                 )
                 plt.plot(
@@ -147,3 +149,45 @@ class Corona:
                     if re.search(regex, country, re.I)]
         return list(self.data.index.levels[0])
 
+    def country_data(self, country):
+        """Returns the data for a single country"""
+        idx = pd.IndexSlice
+        return (
+            self.data.
+            loc[idx[country, :, :], :].
+            groupby(level=[0, 2]).
+            sum()
+        )
+
+    def curve_fit(self, country, end_range):
+        data = self.country_data(country)
+        x_values = np.arange(len(data.confirmed.values))
+        y_values = data.confirmed.values
+
+        p_expo, _ = optimize.curve_fit(expo, x_values, y_values, p0=[0.1, 0.1])
+        p_logistic, _ = optimize.curve_fit(logistic, x_values, y_values, p0=[50000, 1, 55])
+
+        x_fit = np.arange(end_range)
+        y_fit1 = expo(x_fit, p_expo[0], p_expo[1])
+        y_fit2 = logistic(x_fit, p_logistic[0], p_logistic[1], p_logistic[2])
+        plt.figure(figsize=self.figsize)
+        plt.scatter(x_values, y_values)
+        plt.plot(x_fit, y_fit1, label="Exponential Fit")
+        plt.plot(x_fit, y_fit2, label="Logistic Fit")
+        plt.legend()
+        exp1 = round(p_expo[0], 3)
+        exp2 = round(p_expo[1], 3)
+        log1 = round(p_logistic[0], 3)
+        log2 = round(p_logistic[1], 3)
+        log3 = round(p_logistic[2], 3)
+        top = y_fit1[-1]
+        mid = end_range/2
+        big_gap = 0.07 * top
+        small_gap = 0.05 * top
+        text = plt.text(mid, top, f"Exponential: $f(x) = {exp1}e^{{{exp2}x}}$",
+                        fontsize=20, ha='center')
+        plt.text(mid, top-big_gap,
+                 f"Logistic: $f(x) = \\frac{{{log1}}}{{1 + e^{{-{log2}(x - {log3})}}}}$",
+                 fontsize=20, ha='center')
+        plt.text(mid, top-2*big_gap, f"Logistic Midpoint: {log3}", ha='center')
+        plt.text(mid, top-2*big_gap-small_gap, f"Logistic Maximum: {log1}", ha='center')
