@@ -151,22 +151,29 @@ class Corona:
                     if re.search(regex, country, re.I)]
         return list(self.data.index.levels[0])
 
-    def country_data(self, country, offset_before_first_case=None):
-        """Returns the data for a single country
+    def country_data(self, country=None, offset_before_first_case=None):
+        """Returns the data for a single country or the world
         Args:
-            country (string): The country for which to fit (see countries())
+            country (string): The country for which to fit, world if None (see countries())
         Keyword Arguments:
             offset_before_first_case (int): The number of days before the first case to start the
                 dataset. If 0, dataset will start on day of first case. If None, all data is 
                 returned.
         """
         idx = pd.IndexSlice
-        data = (
-            self.data.
-            loc[idx[country, :, :], :].
-            groupby(level=[0, 2]).
-            sum()
-        )
+        if country:
+            data = (
+                self.data.
+                loc[idx[country, :, :], :].
+                groupby(level=[0, 2]).
+                sum()
+            )
+        else:
+            data = (
+                self.data.
+                groupby(level=2).
+                sum()
+            )
         if offset_before_first_case is None:
             return data
 
@@ -214,3 +221,15 @@ class Corona:
                  fontsize=20, ha='center')
         plt.text(mid, top-2*big_gap, f"Logistic Midpoint: {log3}", ha='center')
         plt.text(mid, top-2*big_gap-small_gap, f"Logistic Maximum: {log1}", ha='center')
+        plt.title(country)
+
+    def country_stats(self, country=None):
+        """Provides some statistics for a given country or the world"""
+        data = self.country_data(country, 0)
+        return {
+            "Number of Infections": data.confirmed[-1],
+            "Number of Deaths": data.deaths[-1],
+            "Number of Recoveries": data.recovered[-1],
+            "Mortality Rate": data.deaths[-1]/data.confirmed[-1],
+            "First Infection": data.shape[0],
+        }
