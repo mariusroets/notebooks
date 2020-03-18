@@ -149,23 +149,31 @@ class Corona:
                     if re.search(regex, country, re.I)]
         return list(self.data.index.levels[0])
 
-    def country_data(self, country):
+    def country_data(self, country, offset_before_first_case=None):
         """Returns the data for a single country"""
         idx = pd.IndexSlice
-        return (
+        data = (
             self.data.
             loc[idx[country, :, :], :].
             groupby(level=[0, 2]).
             sum()
         )
+        if offset_before_first_case is None:
+            return data
 
-    def curve_fit(self, country, end_range):
-        data = self.country_data(country)
+        first_non_zero = (data.confirmed > 0).values.argmax()
+        data_start = max(first_non_zero - offset_before_first_case, 0)
+        return data.iloc[data_start:, :]
+
+
+    def curve_fit(self, country, end_range, offset_before_first_case=None):
+        data = self.country_data(country, offset_before_first_case)
         x_values = np.arange(len(data.confirmed.values))
         y_values = data.confirmed.values
 
         p_expo, _ = optimize.curve_fit(expo, x_values, y_values, p0=[0.1, 0.1])
-        p_logistic, _ = optimize.curve_fit(logistic, x_values, y_values, p0=[50000, 1, 55])
+        p_logistic, _ = optimize.curve_fit(logistic, x_values, y_values,
+                                           p0=[y_values[-1], 1, x_values[-1]])
 
         x_fit = np.arange(end_range)
         y_fit1 = expo(x_fit, p_expo[0], p_expo[1])
