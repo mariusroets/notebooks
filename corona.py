@@ -63,7 +63,9 @@ def logistic(x, L, k, x0):
     return L/(1 + np.exp(-k*(x - x0)))
 
 class Corona:
-    """Retrieve, view and analyze data on the spread of Covid-19"""
+    """Retrieve, view and analyze data on the spread of Covid-19
+
+    It uses data compiled by Johns Hopkins University and published on their Github repo"""
     def __init__(self):
         self._data = None
         self._figsize = (14, 10)
@@ -150,7 +152,14 @@ class Corona:
         return list(self.data.index.levels[0])
 
     def country_data(self, country, offset_before_first_case=None):
-        """Returns the data for a single country"""
+        """Returns the data for a single country
+        Args:
+            country (string): The country for which to fit (see countries())
+        Keyword Arguments:
+            offset_before_first_case (int): The number of days before the first case to start the
+                dataset. If 0, dataset will start on day of first case. If None, all data is 
+                returned.
+        """
         idx = pd.IndexSlice
         data = (
             self.data.
@@ -165,8 +174,14 @@ class Corona:
         data_start = max(first_non_zero - offset_before_first_case, 0)
         return data.iloc[data_start:, :]
 
-
     def curve_fit(self, country, end_range, offset_before_first_case=None):
+        """Fits a exponential and logistic curve to the data for a given country
+        Args:
+            country (string): The country for which to fit (see countries())
+            end_range (int): Where to end the projection of the fitted curves (number of days)
+        Keyword Arguments:
+            offset_before_first_case (int): See country_data()
+        """
         data = self.country_data(country, offset_before_first_case)
         x_values = np.arange(len(data.confirmed.values))
         y_values = data.confirmed.values
