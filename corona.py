@@ -1,4 +1,5 @@
 """Contains a class for retrieving and analysing data relating to Covid-19 pandemic"""
+import os
 import re
 import requests
 from bs4 import BeautifulSoup
@@ -14,6 +15,47 @@ URLS = {
     'recovered': 'https://github.com/CSSEGISandData/COVID-19/raw/master/csse_covid_19_data/csse_covid_19_time_series/time_series_19-covid-Recovered.csv',
     'worldometer': 'https://www.worldometers.info/coronavirus/',
 }
+PICKLE_FILE = 'output/data.pkl'
+PICKLE_DIR = 'output'
+def read_worldometer():
+    """Returns a dataframe with the current Worldometer statistics"""
+    response = requests.get(URLS['worldometer'])
+    soup = BeautifulSoup(response.content, 'html.parser')
+    table = soup.find('table', id='main_table_countries')
+    data = []
+    for row in table.find_all('tr'):
+        cols = row.find_all('td')
+        cols = [ele.text.strip() for ele in cols]
+        data.append([ele for ele in cols if ele])
+    return pd.DataFrame(
+        data,
+        columns=[
+            'country',
+            'total',
+            'new',
+            'deaths',
+            'new_deaths',
+            'recovered',
+            'active',
+            'serious',
+            'cases_per_mil'])
+        
+def read_jhu_file(filename, label):
+    """Read the Johns Hopkins University file format"""
+    data = pd.read_csv(filename)
+    return (
+        data.
+        rename(columns={
+            'Province/State': 'province',
+            'Country/Region': 'country',
+            'Lat': 'lat',
+            'Long': 'long'}).
+        melt(id_vars=['country', 'province', 'lat', 'long']).
+        rename(columns={'variable': 'date', 'value': label}).
+        assign(date=lambda x: x.date.astype('datetime64'),
+               province=lambda x: np.where(x.province.isnull(), x.country, x.province)).
+        set_index(['country', 'province', 'date'])
+    )
 
 class Corona:
     """Retrieve, view and analyze data on the spread of Covid-19"""
@@ -39,40 +81,23 @@ class Corona:
     def figsize(self, value):
         self._figsize = value
 
-    def read_worldometer(self):
-        """Returns a dataframe with the current Worldometer statistics"""
-        response = requests.get(URLS['worldometer'])
-        soup = BeautifulSoup(response.content, 'html.parser')
-        table = soup.find('table', id='main_table_countries')
-        data = []
-        for row in table.find_all('tr'):
-            cols = row.find_all('td')
-            cols = [ele.text.strip() for ele in cols]
-            data.append([ele for ele in cols if ele])
-        return pd.DataFrame(
-            data,
-            columns=[
-                'country',
-                'total',
-                'new',
-                'deaths',
-                'new_deaths',
-                'recovered',
-                'active',
-                'serious',
-                'cases_per_mil'])
-
-    def read_jhu(self):
+    def read_jhu(self, use_cache=True):
         "Reads data from Johns Hopkins University Github data. Updated daily."
+        if use_cache and os.path.exists(PICKLE_FILE):
+            self.data = pd.read_pickle(PICKLE_FILE)
+            return
+
         results = {}
         for key in ['confirmed', 'recovered', 'deaths']:
-            results[key] = self._read_file(URLS[key], key)
+            results[key] = read_jhu_file(URLS[key], key)
         self._data = (
             results['confirmed'].
             join(results['recovered'].drop(columns=['lat', 'long'])).
             join(results['deaths'].drop(columns=['lat', 'long'])).
             sort_index()
         )
+        if os.path.exists(PICKLE_DIR):
+            self.data.to_pickle(PICKLE_FILE)
 
     def do_plot(self, countries, columns, offsets=None, yscale='linear'):
         """Do a time series plot of the data
@@ -122,19 +147,3 @@ class Corona:
                     if re.search(regex, country, re.I)]
         return list(self.data.index.levels[0])
 
-    def _read_file(self, filename, label):
-        """Read the Johns Hopkins University file format"""
-        data = pd.read_csv(filename)
-        return (
-            data.
-            rename(columns={
-                'Province/State': 'province',
-                'Country/Region': 'country',
-                'Lat': 'lat',
-                'Long': 'long'}).
-            melt(id_vars=['country', 'province', 'lat', 'long']).
-            rename(columns={'variable': 'date', 'value': label}).
-            assign(date=lambda x: x.date.astype('datetime64'),
-                   province=lambda x: np.where(x.province.isnull(), x.country, x.province)).
-            set_index(['country', 'province', 'date'])
-        )
