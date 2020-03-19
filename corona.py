@@ -181,46 +181,63 @@ class Corona:
         data_start = max(first_non_zero - offset_before_first_case, 0)
         return data.iloc[data_start:, :]
 
-    def curve_fit(self, country, end_range, offset_before_first_case=None):
+    def curve_fit(self, country, end_range, offset_before_first_case=None, expo_day_limit=None):
         """Fits a exponential and logistic curve to the data for a given country
         Args:
             country (string): The country for which to fit (see countries())
             end_range (int): Where to end the projection of the fitted curves (number of days)
         Keyword Arguments:
             offset_before_first_case (int): See country_data()
+            expo_day_limit (int): Only use this number of days to fit exponential function. 
+                This is useful where the actual data has already turned logistic
         """
-        data = self.country_data(country, offset_before_first_case)
+        data = self.country_data(country, offset_before_first_case).copy()
         x_values = np.arange(len(data.confirmed.values))
         y_values = data.confirmed.values
-
-        p_expo, _ = optimize.curve_fit(expo, x_values, y_values, p0=[0.1, 0.1])
-        p_logistic, _ = optimize.curve_fit(logistic, x_values, y_values,
-                                           p0=[y_values[-1], 1, x_values[-1]])
+        
+        if not expo_day_limit:
+            p_expo, _ = optimize.curve_fit(expo, x_values, y_values, p0=[0.1, 0.1])
+        else:
+            p_expo, _ = optimize.curve_fit(expo, x_values[:expo_day_limit], y_values[:expo_day_limit], p0=[0.1, 0.1])
+        try:
+            p_logistic, _ = optimize.curve_fit(logistic, x_values, y_values,
+                                               p0=[y_values[-1], 1, x_values[-1]])
+        except RuntimeError:
+            p_logistic = None
 
         x_fit = np.arange(end_range)
         y_fit1 = expo(x_fit, p_expo[0], p_expo[1])
-        y_fit2 = logistic(x_fit, p_logistic[0], p_logistic[1], p_logistic[2])
-        plt.figure(figsize=self.figsize)
-        plt.scatter(x_values, y_values)
-        plt.plot(x_fit, y_fit1, label="Exponential Fit")
-        plt.plot(x_fit, y_fit2, label="Logistic Fit")
-        plt.legend()
-        exp1 = round(p_expo[0], 3)
-        exp2 = round(p_expo[1], 3)
-        log1 = round(p_logistic[0], 3)
-        log2 = round(p_logistic[1], 3)
-        log3 = round(p_logistic[2], 3)
-        top = y_fit1[-1]
+        y_fit2 = None
+        if p_logistic is not None:
+            y_fit2 = logistic(x_fit, p_logistic[0], p_logistic[1], p_logistic[2])
+            y_fit1 = np.where(y_fit1 > 2*y_fit2[-1], np.nan, y_fit1)
+
+        top = y_fit1[~np.isnan(y_fit1)][-1]
         mid = end_range/2
         big_gap = 0.07 * top
         small_gap = 0.05 * top
+        
+        plt.figure(figsize=self.figsize)
+        plt.scatter(x_values, y_values)
+        plt.plot(x_fit, y_fit1, label="Exponential Fit")
+        if p_logistic is not None:
+            plt.plot(x_fit, y_fit2, label="Logistic Fit")
+            log1 = round(p_logistic[0], 3)
+            log2 = round(p_logistic[1], 3)
+            log3 = round(p_logistic[2], 3)
+            plt.text(mid, top-big_gap,
+                     f"Logistic: $f(x) = \\frac{{{log1}}}{{1 + e^{{-{log2}(x - {log3})}}}}$",
+                     fontsize=20, ha='center')
+            plt.text(mid, top-2*big_gap, f"Logistic Midpoint: {log3}", ha='center')
+            plt.text(mid, top-2*big_gap-small_gap, f"Logistic Maximum: {log1}", ha='center')
+        plt.legend()
+        
+        exp1 = round(p_expo[0], 3)
+        exp2 = round(p_expo[1], 3)
         text = plt.text(mid, top, f"Exponential: $f(x) = {exp1}e^{{{exp2}x}}$",
                         fontsize=20, ha='center')
-        plt.text(mid, top-big_gap,
-                 f"Logistic: $f(x) = \\frac{{{log1}}}{{1 + e^{{-{log2}(x - {log3})}}}}$",
-                 fontsize=20, ha='center')
-        plt.text(mid, top-2*big_gap, f"Logistic Midpoint: {log3}", ha='center')
-        plt.text(mid, top-2*big_gap-small_gap, f"Logistic Maximum: {log1}", ha='center')
+        
+        
         plt.title(country)
 
     def country_stats(self, country=None):
